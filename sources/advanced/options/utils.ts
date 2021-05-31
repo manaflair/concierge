@@ -1,8 +1,10 @@
+import {CompletionResults, CompletionRequest}  from 'clcs';
 import {Coercion, CoercionFn, StrictValidator} from 'typanion';
 
 import {CommandBuilder,  RunState}             from '../../core';
 import {UsageError}                            from '../../errors';
 import {BaseContext, CliContext}               from '../Cli';
+import {Command}                               from '../Command';
 
 export const isOptionSymbol = Symbol(`clipanion/isOption`);
 
@@ -25,7 +27,7 @@ export type Tuple<Type, Arity extends number> = Arity extends Arity
   : never;
 
 export type WithArity<Type, Arity extends number> = Arity extends 0
-  ? boolean
+  ? boolean | Type
   : Arity extends 1
     ? Type
     : number extends Arity
@@ -38,7 +40,22 @@ export type CommandOption<T> = {
   transformer: <Context extends BaseContext>(builder: CommandBuilder<CliContext<Context>>, key: string, state: RunState) => T,
 };
 
-export type CommandOptionReturn<T> = T;
+export type CommandOptionReturnTag = {__isOption?: true};
+export type CommandOptionReturn<T> = T & CommandOptionReturnTag;
+
+export type PartialCommand<T extends Command<any>> = {
+  [P in keyof T]: T[P] extends CommandOptionReturnTag ? T[P] | undefined : T[P];
+};
+
+/**
+ * A completion function that returns completion results based on a completion request.
+ *
+ * @template T The type of the partial command. Can be automatically inferred if the completion function is wrapped in a `Command.prototype.completion` (i.e. `this.completion` inside a command class body).
+ *
+ * @param request The normalized completion request.
+ * @param command The partial command populated with all cli arguments that can be parsed.
+ */
+export type CompletionFunction<T extends Command<any> = any> = (this: undefined, request: CompletionRequest, command: PartialCommand<T>) => CompletionResults;
 
 export function makeCommandOption<T>(spec: Omit<CommandOption<T>, typeof isOptionSymbol>) {
   // We lie! But it's for the good cause: the cli engine will turn the specs into proper values after instantiation.

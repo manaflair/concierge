@@ -770,174 +770,37 @@ describe(`Core`, () => {
     }).to.throw(`Invalid option name ("-%#@$%#()@")`);
   });
 
-  it(`should throw acceptable errors when writing bound boolean arguments`, () => {
+  it(`should throw acceptable errors when writing batches with invalid option names`, () => {
     const cli = makeCli([
       b => {
-        b.addOption({names: [`--foo`], allowBinding: false});
+        b.addOption({names: [`-a`], allowBinding: false});
       },
     ]);
 
     expect(() => {
+      cli.process([`-ab`]);
+    }).to.throw(`Unsupported option name ("-b")`);
+
+    expect(() => {
+      cli.process([`-abc`]);
+    }).to.throw(`Unsupported option names ("-b", "-c")`);
+  });
+
+  it(`should throw acceptable errors when writing bindings with invalid option names`, () => {
+    const cli = makeCli([b => {}]);
+
+    expect(() => {
       cli.process([`--foo=bar`]);
-    }).to.throw(`Invalid option name ("--foo=bar")`);
+    }).to.throw(`Unsupported option name ("--foo")`);
   });
 
-  it(`should suggest simple commands (no input)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-      },
-    ]);
+  it(`should throw acceptable errors when writing unsupported bindings`, () => {
+    const cli = makeCli([b => {
+      b.addOption({names: [`--foo`], allowBinding: false});
+    }]);
 
-    const suggestions = cli.suggest([], false);
-    expect([...suggestions]).to.deep.equal([[`foo`]]);
-  });
-
-  it(`should suggest simple commands (partial match)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([`fo`], true);
-    expect([...suggestions]).to.deep.equal([[`o`]]);
-  });
-
-  it(`should suggest simple commands (partial path)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`, `bar`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`bar`]]);
-  });
-
-  it(`should add a leading space for exact matches on partial paths`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`, `bar`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], true);
-    expect([...suggestions]).to.deep.equal([[``, `bar`]]);
-  });
-
-  it(`should return multiple suggestions when relevant (partial match)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo1`]);
-      },
-      b => {
-        b.addPath([`foo2`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([`fo`], true);
-    expect([...suggestions]).to.deep.equal([[`o1`], [`o2`]]);
-  });
-
-  it(`should return multiple suggestions when relevant (no input)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo1`]);
-      },
-      b => {
-        b.addPath([`foo2`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([], false);
-    expect([...suggestions]).to.deep.equal([[`foo1`], [`foo2`]]);
-  });
-
-  it(`should return multiple suggestions when relevant (partial paths)`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`, `bar1`]);
-      },
-      b => {
-        b.addPath([`foo`, `bar2`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`bar1`], [`bar2`]]);
-  });
-
-  it(`should suggest options`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-        b.addOption({names: [`--bar`]});
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`--bar`]]);
-  });
-
-  it(`should suggest deep paths`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`, `bar`]);
-      },
-    ]);
-
-    const suggestions = cli.suggest([], false);
-    expect([...suggestions]).to.deep.equal([[`foo`, `bar`]]);
-  });
-
-  it(`should suggest deep paths and stop at options`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`, `bar`]);
-        b.addOption({names: [`--hello`]});
-      },
-    ]);
-
-    const suggestions = cli.suggest([], false);
-    expect([...suggestions]).to.deep.equal([[`foo`, `bar`]]);
-  });
-
-  it(`should suggest as many options as needed`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-        b.addOption({names: [`--hello`]});
-        b.addOption({names: [`--world`]});
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`--hello`], [`--world`]]);
-  });
-
-  it(`shouldn't suggest hidden options`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-        b.addOption({names: [`--hello`], hidden: true});
-        b.addOption({names: [`--world`]});
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`--world`]]);
-  });
-
-  it(`should only suggest the longest options`, () => {
-    const cli = makeCli([
-      b => {
-        b.addPath([`foo`]);
-        b.addOption({names: [`-h`, `--hello`]});
-      },
-    ]);
-
-    const suggestions = cli.suggest([`foo`], false);
-    expect([...suggestions]).to.deep.equal([[`--hello`]]);
+    expect(() => {
+      cli.process([`--foo=bar`]);
+    }).to.throw(`Unsupported binding ("--foo=bar")`);
   });
 });

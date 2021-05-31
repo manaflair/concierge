@@ -5,7 +5,7 @@
     "experimentalDecorators": true,
     "lib": [
       "DOM",
-      "ES2018"
+      "ESNext"
     ],
     "module": "commonjs",
     "noEmit": true,
@@ -14,4 +14,7 @@
     "target": "ES2018",
     "newLine": "lf"
   },
+  "ts-node": {
+    "transpileOnly": true
+  }
 }

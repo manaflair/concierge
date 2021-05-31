@@ -1,13 +1,14 @@
-import {Readable, Writable}                                     from 'stream';
+import {CompletionResult}                                               from 'clcs';
+import {Readable, Writable}                                             from 'stream';
 
-import {HELP_COMMAND_INDEX}                                     from '../constants';
-import {CliBuilder, CommandBuilder}                             from '../core';
-import {ErrorMeta}                                              from '../errors';
-import {formatMarkdownish, ColorFormat, richFormat, textFormat} from '../format';
+import {CompletionType, HELP_COMMAND_INDEX}                             from '../constants';
+import {CliBuilder, PartialCompletionRequest, CommandBuilder, RunState} from '../core';
+import {ErrorMeta}                                                      from '../errors';
+import {formatMarkdownish, ColorFormat, richFormat, textFormat}         from '../format';
 
-import {CommandClass, Command, Definition}                      from './Command';
-import {HelpCommand}                                            from './HelpCommand';
-import {CommandOption}                                          from './options/utils';
+import {CommandClass, Command, Definition}                              from './Command';
+import {HelpCommand}                                                    from './HelpCommand';
+import {CommandOption}                                                  from './options/utils';
 
 const errorCommandSymbol = Symbol(`clipanion/errorCommand`);
 
@@ -101,6 +102,16 @@ export type MiniCli<Context extends BaseContext> = CliOptions & {
   process(input: Array<string>): Command<Context>;
 
   /**
+   * Completes a command.
+   *
+   * @param request A completion request
+   * @param context Overrides the Context of the main `Cli` instance
+   *
+   * @returns The completion results, sorted and partially deduplicated
+   */
+  complete(request: PartialCompletionRequest, context?: Partial<Context>): Promise<Array<CompletionResult>>;
+
+  /**
    * Runs a command.
    *
    * @param input An array containing the name of the command and its arguments
@@ -186,6 +197,21 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
     this.enableColors = enableColors;
   }
 
+  private makeMiniCli(context: Context): MiniCli<Context> {
+    return {
+      binaryLabel: this.binaryLabel,
+      binaryName: this.binaryName,
+      binaryVersion: this.binaryVersion,
+      enableColors: this.enableColors,
+      definitions: () => this.definitions(),
+      error: (error, opts) => this.error(error, opts),
+      process: input => this.process(input),
+      complete: (request, subContext?) => this.complete(request, {...context, ...subContext}),
+      run: (input, subContext?) => this.run(input, {...context, ...subContext}),
+      usage: (command, opts) => this.usage(command, opts),
+    };
+  }
+
   /**
    * Registers a command inside the CLI.
    */
@@ -218,17 +244,18 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
     });
   }
 
-  process(input: Array<string>) {
-    const {contexts, process} = this.builder.compile();
-    const state = process(input);
-
+  private processImpl(state: RunState, contexts: Array<CliContext<Context>>) {
     switch (state.selectedIndex) {
+      case null: {
+        throw new Error(`Assertion failed: Expected the cli index to have been selected`);
+      } break;
+
       case HELP_COMMAND_INDEX: {
-        return HelpCommand.from<Context>(state, contexts);
+        return {commandClass: HelpCommand, command: HelpCommand.from<Context>(state, contexts)};
       } break;
 
       default: {
-        const {commandClass} = contexts[state.selectedIndex!];
+        const {commandClass} = contexts[state.selectedIndex];
 
         const record = this.registrations.get(commandClass);
         if (typeof record === `undefined`)
@@ -241,13 +268,27 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
           for (const [key, {transformer}] of record.specs.entries())
             (command as any)[key] = transformer(record.builder, key, state);
 
-          return command;
+          return {commandClass, command};
         } catch (error) {
           error[errorCommandSymbol] = command;
           throw error;
         }
       } break;
     }
+  }
+
+  private populateCommand(command: Command<Context>, context: Context) {
+    command.context = context;
+    command.cli = this.makeMiniCli(context);
+  }
+
+  process(input: Array<string>) {
+    const {contexts, process} = this.builder.compile();
+    const state = process(input);
+
+    const {command} = this.processImpl(state, contexts);
+
+    return command;
   }
 
   async run(input: Command<Context> | Array<string>, context: Context) {
@@ -259,7 +300,7 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
       try {
         command = this.process(input);
       } catch (error) {
-        context.stdout.write(this.error(error));
+        context.stderr.write(this.error(error));
         return 1;
       }
     }
@@ -269,24 +310,13 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
       return 0;
     }
 
-    command.context = context;
-    command.cli = {
-      binaryLabel: this.binaryLabel,
-      binaryName: this.binaryName,
-      binaryVersion: this.binaryVersion,
-      enableColors: this.enableColors,
-      definitions: () => this.definitions(),
-      error: (error, opts) => this.error(error, opts),
-      process: input => this.process(input),
-      run: (input, subContext?) => this.run(input, {...context, ...subContext}),
-      usage: (command, opts) => this.usage(command, opts),
-    };
+    this.populateCommand(command, context);
 
     let exitCode;
     try {
       exitCode = await command.validateAndExecute().catch(error => command.catch(error).then(() => 0));
     } catch (error) {
-      context.stdout.write(this.error(error, {command}));
+      context.stderr.write(this.error(error, {command}));
       return 1;
     }
 
@@ -305,9 +335,40 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
     process.exitCode = await this.run(input, context);
   }
 
-  suggest(input: Array<string>, partial: boolean) {
-    const {suggest} = this.builder.compile();
-    return suggest(input, partial);
+  async complete(request: PartialCompletionRequest, context: Context): Promise<Array<CompletionResult>> {
+    const {complete, contexts} = this.builder.compile();
+    const states = complete(request);
+
+    type Result = {
+      commandClass: CommandClass<Context> | typeof HelpCommand;
+      partialCommand: Command<Context> | HelpCommand<Context>;
+      completionType: CompletionType;
+      completionResult: CompletionResult;
+    };
+
+    const results: Array<Result> = [];
+
+    await Promise.all(states.map(async state => {
+      if (state.completion === null)
+        return;
+
+      const {commandClass, command: partialCommand} = this.processImpl(state, contexts);
+      const {completion: {fn, request: completionRequest, type}} = state;
+
+      this.populateCommand(partialCommand, context);
+
+      const completionResult = await fn.call(undefined, completionRequest, partialCommand);
+      const completionResults = Array.isArray(completionResult) ? completionResult : [completionResult];
+
+      for (const result of completionResults) {
+        results.push({commandClass, partialCommand, completionType: type, completionResult: result});
+      }
+    }));
+
+    return results
+      // TODO: sort the completion results based on various criteria
+      .sort()
+      .map(result => result.completionResult);
   }
 
   definitions({colored = false}: {colored?: boolean} = {}): Array<Definition> {
@@ -484,9 +545,11 @@ export class Cli<Context extends BaseContext = BaseContext> implements MiniCli<C
     return result;
   }
 
-  error(error: Error | any, {colored, command = error[errorCommandSymbol] ?? null}: {colored?: boolean, command?: Command<Context> | null} = {}) {
+  error(error: Error | any, {colored, command}: {colored?: boolean, command?: Command<Context> | null} = {}) {
     if (!(error instanceof Error))
       error = new Error(`Execution failed with a non-error rejection (rejected value: ${JSON.stringify(error)})`);
+
+    command = error[errorCommandSymbol] ?? null;
 
     let result = ``;
 

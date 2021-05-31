@@ -6,7 +6,7 @@ import {Command, Option} from '..';
 type AssertEqual<T, Expected> = [T, Expected] extends [Expected, T] ? true : false;
 
 function assertEqual<U>() {
-  return <V>(val: V, expected: AssertEqual<U, V>) => {};
+  return <V>(val: V, expected: AssertEqual<Option.CommandOptionReturn<U>, V>) => {};
 }
 
 class MyCommand extends Command {
@@ -88,7 +88,7 @@ class MyCommand extends Command {
     assertEqual<number>()(this.stringWithValidatorAndRequired, true);
     assertEqual<number>()(this.stringWithValidatorAndDefault, true);
     assertEqual<string>()(this.stringWithRequired, true);
-    assertEqual<boolean | undefined>()(this.stringWithArity0, true);
+    assertEqual<boolean | string | undefined>()(this.stringWithArity0, true);
     assertEqual<string | undefined>()(this.stringWithArity1, true);
     assertEqual<[string, string] | undefined>()(this.stringWithArity2, true);
     assertEqual<[string, string, string] | undefined>()(this.stringWithArity3, true);
@@ -110,7 +110,7 @@ class MyCommand extends Command {
     assertEqual<Array<string> | undefined>()(this.array, true);
     assertEqual<Array<string>>()(this.arrayWithDefault, true);
     assertEqual<Array<string>>()(this.arrayWithRequired, true);
-    assertEqual<Array<boolean> | undefined>()(this.arrayWithArity0, true);
+    assertEqual<Array<boolean | string> | undefined>()(this.arrayWithArity0, true);
     assertEqual<Array<string> | undefined>()(this.arrayWithArity1, true);
     assertEqual<Array<[string, string]> | undefined>()(this.arrayWithArity2, true);
     assertEqual<Array<[string, string, string]> | undefined>()(this.arrayWithArity3, true);
